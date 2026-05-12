@@ -5,7 +5,6 @@ import random
 import sys
 import os
 import shutil
-import tempfile
 import platform
 from datetime import datetime, time as dt_time, date, timedelta
 from contextlib import contextmanager
@@ -15,108 +14,131 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.keys import Keys
-from selenium.common.exceptions import NoSuchElementException, TimeoutException, StaleElementReferenceException, ElementNotInteractableException
+from selenium.common.exceptions import (
+    NoSuchElementException, TimeoutException,
+    StaleElementReferenceException, ElementNotInteractableException
+)
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 
 os.environ['WDM_LOG'] = '0'
+os.environ['WDM_PROGRESS_BAR'] = '0'
 from webdriver_manager.chrome import ChromeDriverManager
 
+# ──────────────────────────────────────────────
+# CONFIG
+# ──────────────────────────────────────────────
 CONFIG_FILE = "config.json"
 
 DEFAULT_CONFIG = {
-  "TEST_MODE": False,
-  "TARGET_USERS": ["kullanici1", "kullanici2"],
-  "MESSAGE_TO_SEND": ".",
-  "TARGET_SEND_TIME_HM": [0, 2],
-  "COOKIES_FILE": "cookies.json",
-  "LOG_FILENAME": "tiktok_bot.txt",
-  "USER_AGENT": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36",
-  "TIKTOK_MESSAGES_URL": "https://www.tiktok.com/messages?lang=tr-TR",
-  "HEADLESS_MODE": True
+    "TEST_MODE": False,
+    "TARGET_USERS": ["kullanici1", "kullanici2"],
+    "MESSAGE_TO_SEND": ".",
+    "TARGET_SEND_TIME_HM": [0, 2],
+    "COOKIES_FILE": "cookies.json",
+    "LOG_FILENAME": "tiktok_bot.txt",
+    "USER_AGENT": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36",
+    "TIKTOK_MESSAGES_URL": "https://www.tiktok.com/messages?lang=en",
+    "HEADLESS_MODE": True
 }
 
+IS_LINUX = platform.system() == "Linux"
+IS_WINDOWS = platform.system() == "Windows"
+
+# ──────────────────────────────────────────────
+# LOGGING (early init, will be reconfigured after config load)
+# ──────────────────────────────────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler()]
+)
+
+# ──────────────────────────────────────────────
+# CONFIG LOADER
+# ──────────────────────────────────────────────
 def load_or_create_config(filename):
     if not os.path.exists(filename):
-        logging.warning(f"Configuration file '{filename}' not found. Creating it with default values.")
+        logging.warning(f"Config '{filename}' not found. Creating with defaults.")
         try:
             with open(filename, 'w', encoding='utf-8') as f:
                 json.dump(DEFAULT_CONFIG, f, indent=4, ensure_ascii=False)
-            logging.info(f"Default configuration file '{filename}' created successfully.")
+            logging.info(f"Default config '{filename}' created.")
             return DEFAULT_CONFIG
-        except IOError as e:
-            logging.error(f"ERROR: Could not create configuration file '{filename}': {e}")
-            return None
         except Exception as e:
-            logging.error(f"ERROR: An unexpected error occurred while creating config file '{filename}': {e}")
+            logging.error(f"Could not create config: {e}")
             return None
     else:
         try:
             with open(filename, 'r', encoding='utf-8') as f:
-                config_data = json.load(f)
-            logging.info(f"Configuration loaded successfully from existing '{filename}'.")
-            return config_data
+                data = json.load(f)
+            logging.info(f"Config loaded from '{filename}'.")
+            return data
         except json.JSONDecodeError as e:
-            logging.error(f"ERROR: Configuration file '{filename}' contains invalid JSON: {e}")
+            logging.error(f"Invalid JSON in config: {e}")
             return None
         except Exception as e:
-            logging.error(f"ERROR: An unexpected error occurred while loading config file '{filename}': {e}")
+            logging.error(f"Error loading config: {e}")
             return None
 
+# ──────────────────────────────────────────────
+# PROCESS CLEANUP
+# ──────────────────────────────────────────────
 def terminate_lingering_processes():
-    logging.info("Searching for and terminating any lingering chrome/chromedriver processes...")
+    logging.info("Terminating any lingering chrome/chromedriver processes...")
     try:
-        current_os = platform.system()
-        if current_os == "Windows":
+        if IS_WINDOWS:
             os.system("taskkill /F /IM chromedriver.exe /T > NUL 2>&1")
             os.system("taskkill /F /IM chrome.exe /T > NUL 2>&1")
         else:
             os.system("pkill -f chromedriver > /dev/null 2>&1")
-            os.system("pkill -fi chrome > /dev/null 2>&1")
-        logging.info("Process termination commands executed.")
+            os.system("pkill -f chromium > /dev/null 2>&1")
+            os.system("pkill -f chrome > /dev/null 2>&1")
+        logging.info("Process cleanup done.")
     except Exception as e:
-        logging.error(f"An error occurred during process termination: {e}")
+        logging.error(f"Error during process cleanup: {e}")
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', handlers=[logging.StreamHandler()])
-
+# ──────────────────────────────────────────────
+# LOAD CONFIG
+# ──────────────────────────────────────────────
 config = load_or_create_config(CONFIG_FILE)
 if config is None:
-    logging.critical("Exiting due to configuration file error (loading or creation failed).")
+    logging.critical("Exiting: config error.")
     sys.exit(1)
 
-TEST_MODE = config.get('TEST_MODE', DEFAULT_CONFIG['TEST_MODE'])
-TARGET_USERS = config.get('TARGET_USERS', DEFAULT_CONFIG['TARGET_USERS'])
-MESSAGE_TO_SEND = config.get('MESSAGE_TO_SEND', DEFAULT_CONFIG['MESSAGE_TO_SEND'])
-time_hm = config.get('TARGET_SEND_TIME_HM', DEFAULT_CONFIG['TARGET_SEND_TIME_HM'])
-COOKIES_FILE = config.get('COOKIES_FILE', DEFAULT_CONFIG['COOKIES_FILE'])
+TEST_MODE        = config.get('TEST_MODE',            DEFAULT_CONFIG['TEST_MODE'])
+TARGET_USERS     = config.get('TARGET_USERS',         DEFAULT_CONFIG['TARGET_USERS'])
+MESSAGE_TO_SEND  = config.get('MESSAGE_TO_SEND',      DEFAULT_CONFIG['MESSAGE_TO_SEND'])
+time_hm          = config.get('TARGET_SEND_TIME_HM',  DEFAULT_CONFIG['TARGET_SEND_TIME_HM'])
+COOKIES_FILE     = config.get('COOKIES_FILE',         DEFAULT_CONFIG['COOKIES_FILE'])
+LOG_FILENAME     = config.get('LOG_FILENAME',         DEFAULT_CONFIG['LOG_FILENAME'])
+USER_AGENT       = config.get('USER_AGENT',           DEFAULT_CONFIG['USER_AGENT'])
+TIKTOK_MESSAGES_URL = config.get('TIKTOK_MESSAGES_URL', DEFAULT_CONFIG['TIKTOK_MESSAGES_URL'])
+HEADLESS_MODE    = True  # Always True on Linux VPS (no display)
 
+# Ensure cookies file exists
 if not os.path.exists(COOKIES_FILE):
     try:
         with open(COOKIES_FILE, 'w', encoding='utf-8') as f:
             json.dump([], f, indent=4)
-        logging.info(f"Cookies file '{COOKIES_FILE}' not found. Created an empty one.")
+        logging.info(f"Empty cookies file created: '{COOKIES_FILE}'.")
     except Exception as e:
-        logging.error(f"ERROR: Could not create empty cookies file '{COOKIES_FILE}': {e}")
+        logging.error(f"Could not create cookies file: {e}")
 
-LOG_FILENAME = config.get('LOG_FILENAME', DEFAULT_CONFIG['LOG_FILENAME'])
-USER_AGENT = config.get('USER_AGENT', DEFAULT_CONFIG['USER_AGENT'])
-TIKTOK_MESSAGES_URL = config.get('TIKTOK_MESSAGES_URL', DEFAULT_CONFIG['TIKTOK_MESSAGES_URL'])
-HEADLESS_MODE = config.get('HEADLESS_MODE', DEFAULT_CONFIG['HEADLESS_MODE'])
-
+# Parse target time
 try:
     if isinstance(time_hm, list) and len(time_hm) == 2:
         TARGET_SEND_TIME = dt_time(int(time_hm[0]), int(time_hm[1]))
     else:
-        raise ValueError("TARGET_SEND_TIME_HM must be a list of [hour, minute]")
+        raise ValueError("TARGET_SEND_TIME_HM must be [hour, minute]")
 except (ValueError, TypeError) as e:
-    logging.error(f"Invalid TARGET_SEND_TIME_HM format in config: {time_hm}. Error: {e}. Using default {DEFAULT_CONFIG['TARGET_SEND_TIME_HM']}.")
-    TARGET_SEND_TIME = dt_time(DEFAULT_CONFIG['TARGET_SEND_TIME_HM'][0], DEFAULT_CONFIG['TARGET_SEND_TIME_HM'][1])
+    logging.error(f"Invalid TARGET_SEND_TIME_HM: {e}. Using default.")
+    TARGET_SEND_TIME = dt_time(DEFAULT_CONFIG['TARGET_SEND_TIME_HM'][0],
+                               DEFAULT_CONFIG['TARGET_SEND_TIME_HM'][1])
 
-if not TARGET_USERS:
-    logging.warning("Warning: TARGET_USERS list is empty in the configuration. The bot will run but won't send messages.")
-
-for handler in logging.root.handlers[:]:
-    logging.root.removeHandler(handler)
+# Reconfigure logging with file handler
+for h in logging.root.handlers[:]:
+    logging.root.removeHandler(h)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -125,80 +147,77 @@ logging.basicConfig(
         logging.StreamHandler()
     ]
 )
+
 logging.info("--- Bot Started ---")
-logging.info(f"Using configuration from '{CONFIG_FILE}'. TEST_MODE: {TEST_MODE}, Target Time: {TARGET_SEND_TIME.strftime('%H:%M')}")
+logging.info(f"Platform: {platform.system()} | TEST_MODE: {TEST_MODE} | Target Time: {TARGET_SEND_TIME.strftime('%H:%M')}")
 
+# ──────────────────────────────────────────────
+# XPATHS
+# ──────────────────────────────────────────────
 MESSAGE_LIST_CONTAINER_XPATH = "//*[@data-e2e='dm-new-conversation-list']"
-CONVERSATION_ITEM_XPATH = "//*[@data-e2e='dm-new-conversation-item']"
-NICKNAME_CLASS_PARTIAL = "PInfoNickname"
-NICKNAME_XPATH_INSIDE_ITEM = f".//p[contains(@class, '{NICKNAME_CLASS_PARTIAL}')]"
-CLICK_TARGET_XPATH = '//*[@id="main-content-messages"]/div/div[3]/div[4]/div'
-WRITE_TARGET_XPATH = '//*[@id="main-content-messages"]/div/div[3]/div[4]/div/div[1]/div/div[2]/div[2]/div/div/div/div'
-TOAST_XPATH = "//li[@data-sonner-toast]"
+CONVERSATION_ITEM_XPATH      = "//*[@data-e2e='dm-new-conversation-item']"
+NICKNAME_CLASS_PARTIAL       = "PInfoNickname"
+NICKNAME_XPATH_INSIDE_ITEM   = f".//p[contains(@class, '{NICKNAME_CLASS_PARTIAL}')]"
+CLICK_TARGET_XPATH           = '//*[@id="main-content-messages"]/div/div[3]/div[4]/div'
+WRITE_TARGET_XPATH           = '//*[@id="main-content-messages"]/div/div[3]/div[4]/div/div[1]/div/div[2]/div[2]/div/div/div/div'
+TOAST_XPATH                  = "//li[@data-sonner-toast]"
 
+# ──────────────────────────────────────────────
+# COOKIE LOADER
+# ──────────────────────────────────────────────
 def load_cookies(driver, cookie_file):
     logging.info(f"Loading cookies from '{cookie_file}'...")
-    cookies_added_count = 0
-    cookies_failed_count = 0
+    added = 0
+    failed = 0
     try:
         with open(cookie_file, 'r') as f:
             cookies = json.load(f)
-        logging.info(f"Read {len(cookies)} cookies from file.")
+        logging.info(f"Read {len(cookies)} cookies.")
 
         driver.get("https://www.tiktok.com/explore")
-        logging.info(f"Navigated to main domain: {driver.current_url}. Waiting before adding cookies...")
+        logging.info("Navigated to tiktok.com. Waiting before injecting cookies...")
         time.sleep(random.uniform(3, 5))
-        logging.info(f"Starting to add cookies (Browser at {driver.current_url})")
 
         for i, cookie in enumerate(cookies):
-            cookie_to_add = {}
+            c = {}
             try:
-                cookie_to_add['name'] = cookie['name']
-                cookie_to_add['value'] = cookie['value']
-                if 'path' in cookie: cookie_to_add['path'] = cookie['path']
-                if 'domain' in cookie: cookie_to_add['domain'] = cookie['domain']
-                if 'secure' in cookie: cookie_to_add['secure'] = cookie['secure']
-                if 'httpOnly' in cookie: cookie_to_add['httpOnly'] = cookie['httpOnly']
+                c['name']  = cookie['name']
+                c['value'] = cookie['value']
+                for field in ('path', 'domain', 'secure', 'httpOnly'):
+                    if field in cookie:
+                        c[field] = cookie[field]
 
-                if 'expirationDate' in cookie and cookie['expirationDate']:
+                if cookie.get('expirationDate'):
                     try:
-                        expiry_timestamp = int(float(cookie['expirationDate']))
-                        cookie_to_add['expiry'] = expiry_timestamp
+                        c['expiry'] = int(float(cookie['expirationDate']))
                     except (ValueError, TypeError):
-                        logging.debug(f"C#{i+1} ('{cookie.get('name')}') invalid expirationDate. Skipping expiry.")
+                        pass
 
-                if 'sameSite' in cookie:
-                    samesite_value = cookie['sameSite']
-                    if samesite_value is None or isinstance(samesite_value, str) and samesite_value.lower() == 'no_restriction':
-                         if cookie_to_add.get('secure'):
-                             cookie_to_add['sameSite'] = 'None'
-                         else:
-                             logging.debug(f"C#{i+1} ('{cookie.get('name')}') SameSite=None/null but not secure. Skipping SS.")
-                    elif isinstance(samesite_value, str) and samesite_value.lower() in ['lax', 'strict', 'none']:
-                         cookie_to_add['sameSite'] = samesite_value.capitalize()
-                    else:
-                         logging.debug(f"C#{i+1} ('{cookie.get('name')}') unknown sameSite value. Skipping SS.")
+                ss = cookie.get('sameSite')
+                if ss is None or (isinstance(ss, str) and ss.lower() == 'no_restriction'):
+                    if c.get('secure'):
+                        c['sameSite'] = 'None'
+                elif isinstance(ss, str) and ss.lower() in ('lax', 'strict', 'none'):
+                    c['sameSite'] = ss.capitalize()
 
-                if 'domain' not in cookie_to_add or not cookie_to_add['domain']:
-                     cookie_to_add['domain'] = ".tiktok.com"
+                if not c.get('domain'):
+                    c['domain'] = ".tiktok.com"
 
-                logging.debug(f"Attempting to add cookie #{i+1}: {cookie_to_add}")
-                driver.add_cookie(cookie_to_add)
-                cookies_added_count += 1
-
+                driver.add_cookie(c)
+                added += 1
             except Exception as e:
-                cookies_failed_count += 1
-                logging.warning(f"Failed to add cookie C#{i+1} ('{cookie.get('name', 'N/A')}'). Error: {type(e).__name__}")
-                logging.debug(f"Failed cookie details: {cookie_to_add}")
+                failed += 1
+                logging.warning(f"Cookie #{i+1} ('{cookie.get('name', '?')}') failed: {type(e).__name__}")
 
-        if cookies_failed_count > 0:
-            logging.warning(f"{cookies_failed_count} cookies failed to load.")
-        if cookies_added_count > 0:
-             logging.info(f"Successfully added {cookies_added_count} cookies.")
-             return True
+        if failed:
+            logging.warning(f"{failed} cookies failed.")
+        if added:
+            logging.info(f"Successfully added {added} cookies.")
+            return True
         else:
-             logging.error("No cookies were added!")
-             return False
+            logging.error("No cookies were added!")
+            return False
+
     except FileNotFoundError:
         logging.error(f"Cookie file not found: {cookie_file}")
         return False
@@ -206,344 +225,364 @@ def load_cookies(driver, cookie_file):
         logging.error(f"Cookie file is not valid JSON: {cookie_file}")
         return False
     except Exception as e:
-        logging.error(f"Unexpected error during cookie loading:")
-        logging.exception(e)
+        logging.error(f"Unexpected error loading cookies: {e}")
         return False
 
+# ──────────────────────────────────────────────
+# HELPERS
+# ──────────────────────────────────────────────
 def wait_for_element(driver, by, value, timeout=20):
     try:
-        element_present = EC.presence_of_element_located((by, value))
-        WebDriverWait(driver, timeout).until(element_present)
-        logging.info(f"Element found: {by}={value}")
+        WebDriverWait(driver, timeout).until(EC.presence_of_element_located((by, value)))
+        logging.info(f"Element found: {value}")
         return True
     except TimeoutException:
-        logging.error(f"Timeout waiting for element: {by}={value} (in {timeout}s)")
+        logging.error(f"Timeout waiting for element: {value}")
         return False
 
 def find_and_click_conversation(driver, username):
-    logging.info(f"Searching for conversation with '{username}'...")
+    logging.info(f"Searching for conversation: '{username}'...")
     try:
-        logging.info(f"Waiting for conversation items (XPath: {CONVERSATION_ITEM_XPATH})")
         WebDriverWait(driver, 30).until(
             EC.presence_of_element_located((By.XPATH, CONVERSATION_ITEM_XPATH))
         )
         time.sleep(random.uniform(2, 4))
 
-        conversation_items = driver.find_elements(By.XPATH, CONVERSATION_ITEM_XPATH)
-        logging.info(f"Found {len(conversation_items)} conversation items using XPath: {CONVERSATION_ITEM_XPATH}")
+        items = driver.find_elements(By.XPATH, CONVERSATION_ITEM_XPATH)
+        logging.info(f"Found {len(items)} conversation items.")
 
-        if not conversation_items:
-            logging.warning("No conversation items found!")
+        if not items:
+            logging.warning("No conversation items found.")
             return False
 
-        user_found_and_clicked = False
-        for i, item in enumerate(conversation_items):
+        for i, item in enumerate(items):
             try:
-                nickname_element = item.find_element(By.XPATH, NICKNAME_XPATH_INSIDE_ITEM)
-                nickname_text = nickname_element.text.strip()
-                logging.debug(f"Item #{i+1}: Found nickname: '{nickname_text}'")
-
-                if nickname_text.lower() == username.lower():
+                nick_el = item.find_element(By.XPATH, NICKNAME_XPATH_INSIDE_ITEM)
+                nick    = nick_el.text.strip()
+                if nick.lower() == username.lower():
                     logging.info(f"Found '{username}' at item #{i+1}. Clicking...")
                     driver.execute_script("arguments[0].scrollIntoView(true);", item)
                     time.sleep(0.5)
                     item.click()
-                    user_found_and_clicked = True
                     time.sleep(random.uniform(3, 5))
                     return True
-
             except NoSuchElementException:
-                 logging.debug(f"Item #{i+1} does not contain nickname (XPath: {NICKNAME_XPATH_INSIDE_ITEM}).")
-                 continue
+                continue
             except StaleElementReferenceException:
-                logging.warning(f"Stale element reference for item #{i+1}. Retrying search...")
-                logging.warning("Skipping this stale item and continuing search.")
+                logging.warning(f"Stale element at item #{i+1}, skipping.")
                 continue
             except Exception as e:
-                logging.error(f"Error processing conversation item #{i+1}: {e}")
+                logging.error(f"Error at item #{i+1}: {e}")
                 continue
 
-        if not user_found_and_clicked:
-            logging.warning(f"'{username}' not found in the {len(conversation_items)} items.")
-            return False
+        logging.warning(f"'{username}' not found in {len(items)} items.")
+        return False
 
     except TimeoutException:
-        logging.error(f"Timeout waiting for conversation items (XPath: {CONVERSATION_ITEM_XPATH}).")
+        logging.error("Timeout waiting for conversation items.")
         return False
     except Exception as e:
-        logging.error(f"Unexpected error searching/clicking conversation: {e}")
+        logging.error(f"Unexpected error in find_and_click_conversation: {e}")
         return False
-    return False
 
 def send_message_in_open_chat(driver):
-    logging.info("Attempting to send message in the open chat...")
-    click_target = None
-    write_target = None
-
+    logging.info("Sending message...")
     try:
+        # Wait for any toast to disappear
         try:
-            logging.debug("Waiting for potential toast notification to disappear...")
-            WebDriverWait(driver, 7).until(EC.invisibility_of_element_located((By.XPATH, TOAST_XPATH)))
-            logging.info("Toast notification (if any) disappeared.")
+            WebDriverWait(driver, 7).until(
+                EC.invisibility_of_element_located((By.XPATH, TOAST_XPATH))
+            )
         except TimeoutException:
-            logging.debug("Toast notification not found or did not disappear in time.")
-        except Exception as e:
-            logging.warning(f"Error waiting for toast: {e}")
+            pass
 
-        logging.info(f"Waiting for the click target area (XPath: {CLICK_TARGET_XPATH})")
+        # Click chat area
         try:
             click_target = WebDriverWait(driver, 15).until(
                 EC.element_to_be_clickable((By.XPATH, CLICK_TARGET_XPATH))
             )
-            logging.info("Click target found and clickable.")
-        except TimeoutException:
-            logging.error(f"Could not find clickable target (XPath: {CLICK_TARGET_XPATH})!")
-            return False
-
-        logging.info("Clicking the target area...")
-        try:
             driver.execute_script("arguments[0].scrollIntoView(true);", click_target)
             time.sleep(0.5)
             click_target.click()
-            logging.info("Clicked target area.")
             time.sleep(random.uniform(1.5, 2.5))
-        except Exception as click_err:
-            logging.warning(f"Normal click failed ({type(click_err).__name__}). Trying JS click...")
+        except TimeoutException:
+            logging.error("Click target not found.")
+            return False
+        except Exception as e:
+            logging.warning(f"Normal click failed: {e}. Trying JS click...")
             try:
-                driver.execute_script("arguments[0].scrollIntoView(true);", click_target)
-                time.sleep(0.3)
                 driver.execute_script("arguments[0].click();", click_target)
-                logging.info("Clicked via Javascript.")
                 time.sleep(random.uniform(1.5, 2.5))
-            except Exception as js_click_err:
-                 logging.error(f"Javascript click also failed: {js_click_err}")
-                 return False
+            except Exception as je:
+                logging.error(f"JS click also failed: {je}")
+                return False
 
-        logging.info(f"Waiting for the write target area (XPath: {WRITE_TARGET_XPATH})...")
+        # Find write area
         try:
             write_target = WebDriverWait(driver, 15).until(
                 EC.visibility_of_element_located((By.XPATH, WRITE_TARGET_XPATH))
             )
-            logging.info("Found the write target area.")
-            try:
-                driver.execute_script("arguments[0].focus();", write_target)
-                logging.info("Focused the write target area.")
-                time.sleep(0.5)
-            except Exception as focus_err:
-                logging.warning(f"Could not focus write target area (may be okay): {focus_err}")
-
+            driver.execute_script("arguments[0].focus();", write_target)
+            time.sleep(0.5)
         except TimeoutException:
-             logging.error(f"Could not find the write target area (XPath: {WRITE_TARGET_XPATH}) after clicking!")
-             return False
+            logging.error("Write target not found.")
+            return False
 
-        logging.info(f"Sending keys to write target: '{MESSAGE_TO_SEND}'")
+        # Send message
         try:
-             WebDriverWait(driver, 5).until(EC.element_to_be_clickable(write_target))
-             write_target.send_keys(MESSAGE_TO_SEND)
-             time.sleep(random.uniform(0.8, 1.5))
-             write_target.send_keys(Keys.ENTER)
-             logging.info("Message sent (Enter key pressed).")
-             time.sleep(random.uniform(2, 4))
-             return True
-        except ElementNotInteractableException as send_keys_err:
-             logging.warning(f"Normal send_keys failed ({type(send_keys_err).__name__}). Trying JS value set...")
-             try:
-                 driver.execute_script("arguments[0].textContent = arguments[1];", write_target, MESSAGE_TO_SEND)
-                 time.sleep(random.uniform(0.5, 1.0))
-                 write_target.send_keys(Keys.ENTER)
-                 logging.info("Set value via JS and pressed Enter.")
-                 time.sleep(random.uniform(2, 4))
-                 return True
-             except Exception as js_err:
-                 logging.error(f"JS value set or subsequent Enter failed: {type(js_err).__name__} - {js_err}")
-                 logging.exception("Traceback:")
-                 return False
-        except Exception as other_send_err:
-            logging.error(f"Error during send_keys or Enter: {type(other_send_err).__name__} - {other_send_err}")
-            logging.exception("Traceback:")
+            WebDriverWait(driver, 5).until(EC.element_to_be_clickable(write_target))
+            write_target.send_keys(MESSAGE_TO_SEND)
+            time.sleep(random.uniform(0.8, 1.5))
+            write_target.send_keys(Keys.ENTER)
+            logging.info("Message sent.")
+            time.sleep(random.uniform(2, 4))
+            return True
+        except ElementNotInteractableException:
+            logging.warning("send_keys failed. Trying JS textContent...")
+            try:
+                driver.execute_script(
+                    "arguments[0].textContent = arguments[1];", write_target, MESSAGE_TO_SEND
+                )
+                time.sleep(random.uniform(0.5, 1.0))
+                write_target.send_keys(Keys.ENTER)
+                logging.info("Message sent via JS.")
+                time.sleep(random.uniform(2, 4))
+                return True
+            except Exception as je:
+                logging.error(f"JS send also failed: {je}")
+                return False
+        except Exception as e:
+            logging.error(f"Error sending message: {e}")
             return False
 
     except Exception as e:
-        logging.error(f"General error in send_message_in_open_chat: {e}")
-        logging.exception(e)
+        logging.error(f"General error in send_message: {e}")
         return False
 
 def handle_passkey_popup(driver):
-    logging.info("Checking for the 'passkey' creation popup...")
-    passkey_popup_button_xpath = "//div[starts-with(@id, 'floating-ui-')]/div/div[2]/button[1]"
+    logging.info("Checking for passkey popup...")
+    xpath = "//div[starts-with(@id, 'floating-ui-')]/div/div[2]/button[1]"
     try:
-        wait = WebDriverWait(driver, 15)
-        maybe_later_button = wait.until(
-            EC.element_to_be_clickable((By.XPATH, passkey_popup_button_xpath))
-        )
-        logging.info("Passkey popup found. Clicking 'Maybe later'...")
-        maybe_later_button.click()
-        logging.info("Waiting for the passkey popup to disappear...")
-        wait.until(
-            EC.invisibility_of_element_located((By.XPATH, passkey_popup_button_xpath))
-        )
-        logging.info("Passkey popup dismissed successfully.")
+        btn = WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.XPATH, xpath)))
+        logging.info("Passkey popup found. Dismissing...")
+        btn.click()
+        WebDriverWait(driver, 10).until(EC.invisibility_of_element_located((By.XPATH, xpath)))
+        logging.info("Passkey popup dismissed.")
     except TimeoutException:
-        logging.info("Passkey popup did not appear or was already gone, continuing...")
+        logging.info("No passkey popup.")
     except Exception as e:
-        logging.warning(f"An error occurred while handling the passkey popup: {e}")
+        logging.warning(f"Passkey popup error: {e}")
+
+# ──────────────────────────────────────────────
+# WEBDRIVER — optimized for Linux VPS 1GB RAM
+# ──────────────────────────────────────────────
+def get_chrome_binary():
+    """Find Chrome/Chromium binary on Linux."""
+    candidates = [
+        "/usr/bin/chromium-browser",
+        "/usr/bin/chromium",
+        "/usr/bin/google-chrome",
+        "/usr/bin/google-chrome-stable",
+        "/snap/bin/chromium",
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            logging.info(f"Found Chrome binary: {path}")
+            return path
+    return None  # Let ChromeDriver find it automatically
 
 @contextmanager
-def managed_webdriver(headless, user_agent):
+def managed_webdriver():
     terminate_lingering_processes()
     time.sleep(1)
 
     SESSION_DIR = os.path.join(os.getcwd(), "session_data")
-
-    logging.info(f"Checking for and cleaning up any previous session directory at: {SESSION_DIR}")
     if os.path.exists(SESSION_DIR):
         try:
             shutil.rmtree(SESSION_DIR, ignore_errors=True)
-            logging.info("Previous session directory cleaned up successfully.")
+            logging.info("Previous session directory cleaned.")
             time.sleep(1)
         except Exception as e:
-            logging.warning(f"Could not fully clean previous session directory, but continuing. Error: {e}")
+            logging.warning(f"Could not clean session dir: {e}")
 
-    user_data_dir = SESSION_DIR
-    logging.info(f"Using predictable user data directory: {user_data_dir}")
-    
     driver = None
     try:
-        chrome_options = Options()
-        if headless:
-            logging.info("Running in HEADLESS mode.")
-            chrome_options.add_argument("--headless=new")
-        else:
-            logging.info("Running in standard (non-headless) mode.")
-        
-        chrome_options.add_argument(f"user-agent={user_agent}")
-        chrome_options.add_argument("--log-level=3")
-        chrome_options.add_argument("--mute-audio")
-        chrome_options.add_argument("--disable-gpu")
-        chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-        chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-        chrome_options.add_experimental_option('useAutomationExtension', False)
-        chrome_options.add_argument(f"--user-data-dir={user_data_dir}")
+        opts = Options()
+
+        # ── Headless (always on Linux, config-based on Windows) ──
+        if IS_LINUX or HEADLESS_MODE:
+            opts.add_argument("--headless=new")
+            logging.info("Headless mode: ON")
+
+        # ── Anti-detection ──
+        opts.add_argument(f"user-agent={USER_AGENT}")
+        opts.add_argument("--disable-blink-features=AutomationControlled")
+        opts.add_experimental_option("excludeSwitches", ["enable-automation"])
+        opts.add_experimental_option("useAutomationExtension", False)
+
+        # ── Linux VPS required flags ──
+        opts.add_argument("--no-sandbox")           # Required in containers/VPS
+        opts.add_argument("--disable-dev-shm-usage") # Prevents /dev/shm OOM on 1GB RAM
+        opts.add_argument("--disable-gpu")
+        opts.add_argument("--disable-software-rasterizer")
+
+        # ── RAM optimization ──
+        opts.add_argument("--single-process")        # Reduces memory significantly
+        opts.add_argument("--no-zygote")             # Works with single-process
+        opts.add_argument("--renderer-process-limit=1")
+        opts.add_argument("--disable-extensions")
+        opts.add_argument("--disable-plugins")
+        opts.add_argument("--disable-images")        # Don't load images (saves RAM + bandwidth)
+        opts.add_argument("--blink-settings=imagesEnabled=false")
+        opts.add_argument("--disable-javascript-harmony-shipping")
+        opts.add_argument("--disable-background-networking")
+        opts.add_argument("--disable-default-apps")
+        opts.add_argument("--disable-sync")
+        opts.add_argument("--disable-translate")
+        opts.add_argument("--hide-scrollbars")
+        opts.add_argument("--metrics-recording-only")
+        opts.add_argument("--mute-audio")
+        opts.add_argument("--no-first-run")
+        opts.add_argument("--safebrowsing-disable-auto-update")
+        opts.add_argument("--log-level=3")
+        opts.add_argument("--silent")
+
+        # ── Window size (needed for headless element detection) ──
+        opts.add_argument("--window-size=1280,800")
+
+        # ── Session directory ──
+        opts.add_argument(f"--user-data-dir={SESSION_DIR}")
+
+        # ── Chrome binary (Linux) ──
+        if IS_LINUX:
+            binary = get_chrome_binary()
+            if binary:
+                opts.binary_location = binary
 
         service = Service(ChromeDriverManager().install())
-        driver = webdriver.Chrome(service=service, options=chrome_options)
-        
+        driver = webdriver.Chrome(service=service, options=opts)
+
+        # Reduce page load timeout to avoid hanging
+        driver.set_page_load_timeout(60)
+        driver.set_script_timeout(30)
+
         yield driver
 
     finally:
-        logging.info("Entering cleanup phase...")
+        logging.info("Cleanup phase...")
         if driver:
             try:
-                logging.info("Attempting graceful shutdown with driver.quit().")
                 driver.quit()
-                time.sleep(2) 
+                time.sleep(2)
             except Exception as e:
-                logging.warning(f"Error during driver.quit() (might be already closed): {e}")
-        
+                logging.warning(f"driver.quit() error: {e}")
+
         terminate_lingering_processes()
-        
-        logging.info(f"Cleaning up current session directory: {user_data_dir}")
+
         try:
             time.sleep(2)
-            shutil.rmtree(user_data_dir, ignore_errors=True)
-            logging.info(f"Successfully initiated cleanup for session directory: {user_data_dir}")
+            shutil.rmtree(SESSION_DIR, ignore_errors=True)
+            logging.info("Session directory cleaned up.")
         except Exception as e:
-            logging.error(f"CRITICAL: Failed to remove session directory {user_data_dir}. Error: {e}")
+            logging.error(f"Failed to remove session dir: {e}")
 
+# ──────────────────────────────────────────────
+# MAIN BOT LOGIC
+# ──────────────────────────────────────────────
 def run_bot():
     if TEST_MODE:
-        logging.warning("--- TEST MODE (Instant Run) ACTIVE ---")
+        logging.warning("--- TEST MODE ACTIVE ---")
     else:
-        logging.info("--- Normal Mode (Scheduled Run) Starting ---")
+        logging.info("--- Normal Mode ---")
 
     try:
-        with managed_webdriver(headless=HEADLESS_MODE, user_agent=USER_AGENT) as driver:
-            logging.info("Browser opened and managed by context.")
+        with managed_webdriver() as driver:
+            logging.info("Browser ready.")
 
             if not load_cookies(driver, COOKIES_FILE):
-                raise Exception("Failed to load cookies, stopping bot run.")
+                raise Exception("Failed to load cookies.")
 
-            logging.info(f"Navigating to '{TIKTOK_MESSAGES_URL}'...")
+            logging.info(f"Navigating to {TIKTOK_MESSAGES_URL}...")
             driver.get(TIKTOK_MESSAGES_URL)
 
             handle_passkey_popup(driver)
 
-            logging.info(f"Waiting for message list container ({MESSAGE_LIST_CONTAINER_XPATH})...")
+            logging.info("Waiting for message list...")
             if not wait_for_element(driver, By.XPATH, MESSAGE_LIST_CONTAINER_XPATH, timeout=35):
-                logging.warning("Message list container not found. This might cause issues.")
+                logging.warning("Message list container not found. Continuing anyway...")
             else:
-                logging.info("Message list container loaded.")
+                logging.info("Message list loaded.")
+
             time.sleep(random.uniform(3, 6))
 
-            users_to_message = TARGET_USERS
-            if not users_to_message:
-                logging.error("Target user list is empty. Nothing to do. Exiting run.")
+            if not TARGET_USERS:
+                logging.error("TARGET_USERS is empty. Nothing to do.")
                 return
 
-            success_count = 0
-            logging.info(f"Will attempt to send messages to {len(users_to_message)} target users: {', '.join(users_to_message)}")
+            success = 0
+            logging.info(f"Targeting {len(TARGET_USERS)} user(s): {', '.join(TARGET_USERS)}")
 
-            for user in users_to_message:
-                loggable_user = ''.join(c for c in user if c.isprintable())
-                logging.info(f"--- Processing user: '{loggable_user}' ---")
+            for user in TARGET_USERS:
+                safe_user = ''.join(c for c in user if c.isprintable())
+                logging.info(f"--- Processing: '{safe_user}' ---")
+
                 if find_and_click_conversation(driver, user):
                     if send_message_in_open_chat(driver):
-                        success_count += 1
-                        logging.info(f"Message successfully sent to '{loggable_user}'.")
+                        success += 1
+                        logging.info(f"✓ Message sent to '{safe_user}'.")
                     else:
-                        logging.warning(f"Opened chat for '{loggable_user}' but FAILED TO SEND a message.")
+                        logging.warning(f"✗ Opened chat for '{safe_user}' but failed to send.")
                 else:
-                    logging.warning(f"Could not find or click conversation for '{loggable_user}'.")
+                    logging.warning(f"✗ Conversation not found for '{safe_user}'.")
 
-                if len(users_to_message) > 1 and user != users_to_message[-1]:
-                    wait_time = random.uniform(5, 10)
-                    logging.info(f"Waiting {wait_time:.1f} seconds before next user...")
-                    time.sleep(wait_time)
+                if len(TARGET_USERS) > 1 and user != TARGET_USERS[-1]:
+                    wait = random.uniform(5, 10)
+                    logging.info(f"Waiting {wait:.1f}s before next user...")
+                    time.sleep(wait)
 
-            logging.info(f"Finished processing. {success_count}/{len(users_to_message)} messages successfully sent.")
+            logging.info(f"Done. {success}/{len(TARGET_USERS)} messages sent.")
 
     except Exception as e:
-        logging.error("Critical error during bot execution:")
+        logging.error(f"Critical error in run_bot: {e}")
         logging.exception(e)
 
+# ──────────────────────────────────────────────
+# ENTRY POINT
+# ──────────────────────────────────────────────
 if __name__ == "__main__":
     if TEST_MODE:
-        logging.info("Test mode enabled. Running bot immediately.")
+        logging.info("Running immediately (TEST_MODE).")
         run_bot()
-        logging.info("Test mode run finished.")
+        logging.info("Test run finished.")
     else:
         last_run_date = None
-        logging.info(f"Normal mode enabled. Scheduling for {TARGET_SEND_TIME.strftime('%H:%M')}. Starting loop...")
+        logging.info(f"Scheduled mode. Will run daily at {TARGET_SEND_TIME.strftime('%H:%M')}.")
 
         while True:
-            now = datetime.now()
+            now          = datetime.now()
             current_time = now.time()
-            today = now.date()
-            
-            target_plus_one_minute = (datetime.combine(date.today(), TARGET_SEND_TIME) + timedelta(minutes=1)).time()
+            today        = now.date()
 
-            time_in_range = TARGET_SEND_TIME <= current_time < target_plus_one_minute
+            window_end   = (datetime.combine(today, TARGET_SEND_TIME) + timedelta(minutes=1)).time()
+            in_window    = TARGET_SEND_TIME <= current_time < window_end
 
-            if time_in_range and today != last_run_date:
-                logging.info(f"Target time reached ({current_time.strftime('%H:%M:%S')}). Running bot in normal mode...")
+            if in_window and today != last_run_date:
+                logging.info(f"Target time reached. Running bot...")
                 try:
                     run_bot()
                 except Exception as e:
-                     logging.error(f"FATAL: An unhandled exception escaped from run_bot: {e}")
+                    logging.error(f"Unhandled exception in run_bot: {e}")
                 finally:
                     last_run_date = today
-                    logging.info(f"Normal mode run for {today} completed. Waiting until tomorrow {TARGET_SEND_TIME.strftime('%H:%M')}.")
+                    logging.info(f"Run complete. Next run: tomorrow {TARGET_SEND_TIME.strftime('%H:%M')}.")
 
-            now = datetime.now()
-            next_run_dt = datetime.combine(now.date(), TARGET_SEND_TIME)
-            if now > next_run_dt:
-                next_run_dt += timedelta(days=1)
-            
-            sleep_seconds = (next_run_dt - now).total_seconds()
-            if sleep_seconds < 300:
-                check_interval_seconds = 5
-            else:
-                check_interval_seconds = 60
+            # Dynamic sleep: check every 5s near target time, every 60s otherwise
+            next_run = datetime.combine(today, TARGET_SEND_TIME)
+            if datetime.now() >= next_run:
+                next_run += timedelta(days=1)
 
-            logging.debug(f"Next check in {check_interval_seconds} seconds. Next run target: {next_run_dt.strftime('%Y-%m-%d %H:%M:%S')}")
-            time.sleep(check_interval_seconds)
+            secs_until = (next_run - datetime.now()).total_seconds()
+            interval   = 5 if secs_until < 300 else 60
+
+            logging.debug(f"Next run in {secs_until/3600:.1f}h. Checking again in {interval}s.")
+            time.sleep(interval)
