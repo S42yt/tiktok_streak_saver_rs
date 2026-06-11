@@ -191,6 +191,13 @@ async fn build_driver(cfg: &Config, port: u16) -> Result<WebDriver> {
     caps.add_arg(&format!("user-agent={}", cfg.browser.user_agent))?;
     caps.add_arg("--disable-blink-features=AutomationControlled")?;
 
+    // Suppress Chrome console noise (DevTools, USB, GPU, etc.)
+    caps.add_arg("--log-level=3")?;
+    caps.add_arg("--silent")?;
+    caps.add_arg("--disable-logging")?;
+    caps.add_exclude_switch("enable-logging")?;
+    caps.add_exclude_switch("enable-automation")?;
+
     // Container / VPS flags
     caps.add_arg("--no-sandbox")?;
     caps.add_arg("--disable-dev-shm-usage")?;
