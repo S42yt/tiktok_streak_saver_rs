@@ -1,13 +1,20 @@
 # ── Sensitive / credentials ──
 cookies.json
+cookies.txt
 config.json
+config.toml
 
 # ── Bot runtime output ──
 tiktok_bot.txt
 *.log
 session_data/
 
-# ── Python ──
+# ── Rust ──
+/target/
+*.exe
+*.pdb
+
+# ── Python (legacy) ──
 __pycache__/
 *.py[cod]
 *.pyo

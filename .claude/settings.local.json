@@ -1,0 +1,43 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -E \"\\\\.rs$|Cargo|\\\\.toml\")",
+      "Bash(cargo check *)",
+      "WebSearch",
+      "WebFetch(domain:docs.rs)",
+      "Bash(wc -l src/*.rs Cargo.toml config.example.toml Dockerfile docker-compose.yml README.md .gitignore)",
+      "Bash(curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs)",
+      "Bash(sh -s -- -y)",
+      "Bash(export PATH=\"$HOME/.cargo/bin:$PATH\")",
+      "Bash(rustup target *)",
+      "Bash(where cl.exe)",
+      "Bash(where gcc.exe)",
+      "Read(//c/msys64/mingw64/bin/**)",
+      "Bash(rustup toolchain *)",
+      "Bash(rustup default *)",
+      "Bash(rustc --version)",
+      "Read(//c/Program Files/**)",
+      "Read(//c/Program Files \\(x86\\)/**)",
+      "Read(//c/Program Files \\(x86\\)/Windows Kits/10/**)",
+      "Bash(where winget.exe)",
+      "Bash(where choco.exe)",
+      "Bash(cargo metadata *)",
+      "Bash(cargo tree *)",
+      "Bash(python -c ' *)",
+      "Bash(choco install *)",
+      "Bash(winget install *)",
+      "Bash(/c/msys64/usr/bin/pacman.exe -S --noconfirm mingw-w64-x86_64-gcc)",
+      "Bash(/c/msys64/mingw64/bin/gcc.exe --version)",
+      "Bash(export PATH=\"/c/msys64/mingw64/bin:$HOME/.cargo/bin:$PATH\")",
+      "Bash(cargo build *)",
+      "Bash(\"C:/Users/musa/Desktop/tiktok_streak_saver_rs/target/release/tiktok-streak-saver.exe\" --help)",
+      "Bash(where chromedriver.exe)",
+      "Bash(chromedriver --version)",
+      "Bash(\"/c/Program Files/Google/Chrome/Application/chrome.exe\" --version)",
+      "Bash(\"/c/Program Files \\(x86\\)/Google/Chrome/Application/chrome.exe\" --version)",
+      "Bash(reg query *)",
+      "Bash(wmic datafile *)",
+      "Bash(timeout 30 ./target/release/tiktok-streak-saver.exe once)"
+    ]
+  }
+}

@@ -1,0 +1,50 @@
+# ─────────────────────────────────────────────────
+#  TikTok Streak Saver — config.toml
+# ─────────────────────────────────────────────────
+#  Copy this file to  config.toml  and edit it.
+#  Or run:  tiktok-streak-saver setup
+
+[general]
+# Run immediately instead of waiting for the schedule.
+# Useful for testing — set back to false for production.
+test_mode = false
+
+# The message sent to each target user every day.
+message = "."
+
+# Log file for persistent records across runs.
+log_file = "tiktok_bot.log"
+
+[schedule]
+# Daily send time in 24-hour format.
+# Example: hour = 0, minute = 2  →  00:02 AM
+hour = 0
+minute = 2
+
+[auth]
+# Authentication method:
+#   "cookies"  — load session from a JSON file exported with
+#                the Cookie-Editor browser extension.
+#   "browser"  — run `tiktok-streak-saver auth` once to log in
+#                via a real Chrome window; cookies are saved
+#                automatically for future runs.
+method = "cookies"
+
+# Path to the cookies file (used by both methods).
+# Supports both Netscape/curl format (.txt) and JSON format (.json).
+cookies_file = "cookies.txt"
+
+[targets]
+# TikTok usernames (display names) to message.
+users = ["username1", "username2"]
+
+[browser]
+# Run Chrome in headless mode (no visible window).
+# Always forced to true on Linux / Docker.
+headless = true
+
+# User-Agent string sent with every request.
+user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+
+# TikTok DM page URL.
+tiktok_url = "https://www.tiktok.com/messages?lang=en"

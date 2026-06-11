@@ -1,94 +1,186 @@
-# TikTok Streak Bot
+# TikTok Streak Saver
 
-Automates sending a daily message to maintain TikTok streaks. Built to survive silent UI updates, iframe blocks, and run reliably on cheap Low RAM VPS instances.
+A fast, low-memory bot that sends a daily message to your TikTok contacts so your streaks never die. Written in Rust with a real-time TUI dashboard.
 
-## Core Mechanics
+```
+╭─ TikTok Streak Saver  v1.0 ─────────────────────╮
+│                                                   │
+│  ╭─ Status ─────────────────────────────────────╮ │
+│  │  State:     ● Sending messages...            │ │
+│  │  Next run:  00:02 daily  (in 8h 41m)        │ │
+│  │  Auth:      Cookies  (cookies.json)          │ │
+│  │  Message:   "."                              │ │
+│  ╰──────────────────────────────────────────────╯ │
+│  ╭─ Targets ────────────────────────────────────╮ │
+│  │  alex                ● Sent                  │ │
+│  │  jordan              ◐ Sending...            │ │
+│  ╰──────────────────────────────────────────────╯ │
+│  ╭─ Activity Log ───────────────────────────────╮ │
+│  │  00:02:01  Bot started                       │ │
+│  │  00:02:03  Loaded 23 cookies                 │ │
+│  │  00:02:14  Message confirmed to 'alex'       │ │
+│  ╰──────────────────────────────────────────────╯ │
+│                                                   │
+│  q Quit   r Run Now   ↑↓ Scroll Log              │
+╰───────────────────────────────────────────────────╯
+```
 
-*   **Smart Verification:** TikTok frequently drops messages silently. The bot doesn't just hit enter; it checks if the input box actually cleared. If not, it refreshes and retries.
-*   **Iframe Bypass:** TikTok recently started hiding the DM interface inside iframes. The bot detects this and automatically switches context.
-*   **Low-RAM Optimized:** Forces single-process mode, disables images/GPU, and uses `/dev/shm` workarounds to prevent Out-Of-Memory (OOM) crashes on Low RAM VPS environments. 
-*   **Process Management:** Automatically kills lingering zombie `chromedriver` or `chrome` processes before and after runs. No memory leaks over time.
+## Features
 
-## 1. Initial Setup (All Platforms)
+- **TUI dashboard** — live status, per-user progress, scrollable log.
+- **Two auth methods** — import cookies from a browser extension *or* log in via a Chrome window.
+- **Smart verification** — checks that the input field actually cleared after pressing Enter; retries on silent failures.
+- **Iframe bypass** — detects when TikTok hides the DM interface inside iframes and switches context automatically.
+- **Low-RAM friendly** — single-process Chrome, images disabled, aggressive flag tuning for 1 GB VPS boxes.
+- **Scheduling** — runs once per day at the configured time with a built-in scheduler (no external cron needed).
+- **TOML config** — clean, commented `config.toml` instead of JSON.
 
-1.  **Clone the Repo:**
-    ```bash
-    git clone https://github.com/thetrekir/tiktok-streak-bot.git
-    cd tiktok-streak-bot
-    ```
+## Prerequisites
 
-2.  **Get Your Cookies:**
-    *   Log in to TikTok in your browser.
-    *   Use an extension like [Cookie-Editor](https://cookie-editor.com/) to export your cookies for the `tiktok.com` domain.
-    *   Save the JSON data into a file named `cookies.json` in the bot's root directory.
+| Dependency | Install |
+|---|---|
+| **Rust** (build only) | [rustup.rs](https://rustup.rs) |
+| **Chrome / Chromium** | Your package manager or [google.com/chrome](https://www.google.com/chrome/) |
+| **ChromeDriver** | `apt install chromium-driver` / `choco install chromedriver` / [chromedriver.chromium.org](https://chromedriver.chromium.org/downloads) |
 
-3.  **Configure:**
-    Run the bot once or create `config.json` manually:
-    ```json
-    {
-      "TEST_MODE": false,
-      "TARGET_USERS": ["username1", "username2"],
-      "MESSAGE_TO_SEND": "husky",
-      "TARGET_SEND_TIME_HM": [0, 2],
-      "COOKIES_FILE": "cookies.json",
-      "LOG_FILENAME": "tiktok_bot.txt",
-      "HEADLESS_MODE": true
-    }
-    ```
-    *   `TEST_MODE`: `true` ignores the schedule and runs immediately. Useful for debugging.
-    *   `TARGET_SEND_TIME_HM`: `[Hour, Minute]` in 24-hour format (e.g., `[0, 2]` = 00:02 AM).
+> ChromeDriver's major version must match your Chrome version.
 
-## 2. Deployment Options
+## Quick Start
 
-Choose how you want to run the bot based on your environment.
+```bash
+# 1. Clone & build
+git clone https://github.com/thetrekir/tiktok-streak-bot.git
+cd tiktok-streak-bot
+cargo build --release
 
-### Option A: Docker (Recommended for Linux VPS)
+# 2. Configure
+cp config.example.toml config.toml   # then edit
+#   — or —
+./target/release/tiktok-streak-saver setup   # interactive wizard
 
-The cleanest way to run this on a server. It packages its own Chrome binaries and dependencies.
+# 3. Authenticate (choose one)
 
-1. Ensure your `cookies.json` and `config.json` are in the project root (or inside the `/data` dir if you have it mounted).
-2. Edit your timezone in `docker-compose.yml` if necessary.
-3. Build and run in the background:
-   ```bash
-   docker compose up -d --build
-   ```
-4. View logs:
-   ```bash
-   docker compose logs -f
-   ```
+#  Option A: Cookie import
+#   Log in to tiktok.com in your browser, export cookies and save
+#   as cookies.txt (or cookies.json). Both formats are auto-detected:
+#
+#   Netscape format (tabs, from "Get cookies.txt" or curl):
+#     .tiktok.com	TRUE	/	FALSE	1791819519	name	value
+#
+#   JSON format (from Cookie-Editor https://cookie-editor.com/):
+#     [{ "name": "...", "value": "...", "domain": "..." }]
 
-### Option B: Windows Background Service (.exe)
+#  Option B: Browser login
+./target/release/tiktok-streak-saver auth
+#   A Chrome window opens → log in → press Enter in the terminal.
+#   Cookies are saved automatically.
 
-If you use a Windows PC and want the bot to run completely hidden in the background, surviving reboots.
+# 4. Run
+./target/release/tiktok-streak-saver          # TUI mode (default)
+./target/release/tiktok-streak-saver once     # headless one-shot
+```
 
-1. Download the latest `tiktok-bot.exe` from the **Releases** tab.
-2. Put the `.exe`, `config.json`, and `cookies.json` in a folder (e.g., `C:\TikTokBot`).
-3. Download [NSSM](http://nssm.cc/), extract `nssm.exe` (win64).
-4. Open Command Prompt **as Admin** and run:
-   ```cmd
-   nssm install TikTokStreakBot
-   ```
-5. In the NSSM GUI, set the **Path** to your `tiktok-bot.exe`. Click **Install service**.
-6. Start the service:
-   ```cmd
-   sc start TikTokStreakBot
-   ```
-The bot will now run silently every time your PC turns on. Check `tiktok_bot.txt` for logs.
+## Commands
 
-### Option C: Manual Python Execution (Mac/Linux/Windows)
+| Command | Description |
+|---|---|
+| `tiktok-streak-saver` | Start the TUI dashboard (same as `run`) |
+| `tiktok-streak-saver run` | Start the TUI dashboard |
+| `tiktok-streak-saver setup` | Interactive config wizard |
+| `tiktok-streak-saver auth` | Log in to TikTok via browser, save cookies |
+| `tiktok-streak-saver once` | Single headless run (Docker / cron / systemd) |
 
-If you just want to run the script directly.
+All commands accept `-c <path>` to use a different config file (default: `config.toml`).
 
-1. Install requirements:
-   ```bash
-   pip install -r requirements.txt
-   ```
-2. Run it:
-   ```bash
-   python main.py
-   ```
-*(For a background run on Windows without a console window, use `pythonw.exe main.py`)*
+## Configuration
 
-## Logs & Debugging
+Copy `config.example.toml` to `config.toml` and edit it, or run the setup wizard. Here is a minimal example:
 
-The bot writes all operations, retries, and errors to `tiktok_bot.txt` (or whatever you named it in `config.json`). If a message fails, check this log. It will tell you if the element wasn't found, if it got stuck in an iframe, or if the cookie expired.
+```toml
+[general]
+test_mode = false
+message = "."
+
+[schedule]
+hour = 0
+minute = 2
+
+[auth]
+method = "cookies"        # or "browser"
+cookies_file = "cookies.json"
+
+[targets]
+users = ["alice", "bob"]
+
+[browser]
+headless = true
+```
+
+See [`config.example.toml`](config.example.toml) for the full reference with comments.
+
+## Deployment
+
+### Docker (recommended for servers)
+
+1. Create a `data/` directory with your `config.toml` and `cookies.json`.
+2. Set the `TZ` variable in `docker-compose.yml` to your timezone.
+3. Build & run:
+
+```bash
+docker compose up -d --build
+docker compose logs -f
+```
+
+### systemd (Linux)
+
+```ini
+# /etc/systemd/system/tiktok-bot.service
+[Unit]
+Description=TikTok Streak Saver
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/tiktok-bot
+ExecStart=/opt/tiktok-bot/tiktok-streak-saver once
+Restart=always
+RestartSec=60
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl enable --now tiktok-bot
+```
+
+### Windows background service
+
+1. Build the release binary (`cargo build --release`).
+2. Place the `.exe`, `config.toml`, and `cookies.json` in a folder (e.g. `C:\TikTokBot`).
+3. Use [NSSM](http://nssm.cc/) to install it as a service:
+
+```cmd
+nssm install TikTokStreakBot C:\TikTokBot\tiktok-streak-saver.exe once
+sc start TikTokStreakBot
+```
+
+## TUI Keybindings
+
+| Key | Action |
+|---|---|
+| `q` | Quit (when bot is idle) |
+| `Ctrl+q` | Force quit |
+| `r` | Run the bot now (overrides schedule) |
+| `↑` / `k` | Scroll log up |
+| `↓` / `j` | Scroll log down |
+
+## Logs
+
+The bot writes to `tiktok_bot.log` (configurable) on every run. If a message fails the log tells you whether the element was not found, the cookie expired, or the send was silently dropped by TikTok.
+
+## Migrating from the Python version
+
+1. Replace `config.json` with `config.toml` (see example above).
+2. Your existing `cookies.json` works as-is — no changes needed.
+3. The Python `main.py` is no longer used and can be removed.
