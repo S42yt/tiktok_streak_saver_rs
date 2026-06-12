@@ -29,8 +29,10 @@ enum Commands {
     Setup,
     /// Log in to TikTok via a browser window and save cookies
     Auth,
-    /// Run once without TUI — for Docker, cron, or systemd
+    /// Run once without TUI — for cron or systemd
     Once,
+    /// Headless scheduler — runs daily at the configured time, no TUI (for Docker)
+    Schedule,
 }
 
 #[tokio::main]
@@ -47,6 +49,10 @@ async fn main() -> Result<()> {
         Commands::Once => {
             let cfg = config::load_or_create(&cli.config)?;
             bot::run_once(&cfg).await?;
+        }
+        Commands::Schedule => {
+            let cfg = config::load_or_create(&cli.config)?;
+            bot::run_daemon(&cfg).await?;
         }
         Commands::Run => {
             let cfg = config::load_or_create(&cli.config)?;

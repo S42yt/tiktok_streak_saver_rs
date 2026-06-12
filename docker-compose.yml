@@ -5,7 +5,9 @@ services:
     restart: unless-stopped
     # Chrome needs adequate shared memory
     shm_size: "2gb"
-    command: ["tiktok-streak-saver"]
+    # Headless daily scheduler — the TUI needs a real terminal and can't run
+    # in a detached container (fails with "No such device or address").
+    command: ["tiktok-streak-saver", "schedule"]
     volumes:
       # Config and cookies (read-only)
       - ./data/config.toml:/app/config.toml:ro

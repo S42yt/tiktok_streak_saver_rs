@@ -1,5 +1,5 @@
 use anyhow::{bail, Context, Result};
-use chrono::Local;
+use chrono::{Duration as ChronoDuration, Local, NaiveTime};
 use rand::Rng;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
@@ -1019,9 +1019,10 @@ pub async fn browser_auth(config_path: &Path) -> Result<()> {
 //  Headless one-shot (for Docker / cron)
 // ═══════════════════════════════════════════════
 
-pub async fn run_once(cfg: &Config) -> Result<()> {
+/// Spawn a task that prints log entries to stdout/stderr. Returns the sender
+/// and the printer's join handle. Drop the sender and await the handle to flush.
+fn spawn_printer() -> (LogTx, tokio::task::JoinHandle<()>) {
     let (tx, mut rx) = mpsc::unbounded_channel();
-
     let printer = tokio::spawn(async move {
         while let Some(entry) = rx.recv().await {
             let now = Local::now().format("%H:%M:%S");
@@ -1039,6 +1040,11 @@ pub async fn run_once(cfg: &Config) -> Result<()> {
             }
         }
     });
+    (tx, printer)
+}
+
+pub async fn run_once(cfg: &Config) -> Result<()> {
+    let (tx, printer) = spawn_printer();
 
     let result = run_bot(cfg, &tx).await;
     drop(tx);
@@ -1049,4 +1055,63 @@ pub async fn run_once(cfg: &Config) -> Result<()> {
         Err(e) => eprintln!("\nBot error: {e}"),
     }
     Ok(())
+}
+
+// ═══════════════════════════════════════════════
+//  Headless scheduler daemon (for Docker / systemd)
+// ═══════════════════════════════════════════════
+
+/// Runs forever: sleeps until the configured daily time, fires a run, repeats.
+/// Logs to stdout so it works in a container with no TTY (unlike the TUI).
+pub async fn run_daemon(cfg: &Config) -> Result<()> {
+    let (tx, _printer) = spawn_printer();
+
+    if cfg.general.test_mode {
+        warn(&tx, "TEST MODE — running immediately, then exiting");
+        let _ = run_bot(cfg, &tx).await;
+        return Ok(());
+    }
+
+    info(
+        &tx,
+        format!(
+            "Scheduler started — sending daily at {:02}:{:02} (local time)",
+            cfg.schedule.hour, cfg.schedule.minute
+        ),
+    );
+
+    let target = NaiveTime::from_hms_opt(cfg.schedule.hour, cfg.schedule.minute, 0)
+        .context("Invalid schedule hour/minute in config")?;
+
+    loop {
+        // Compute the next occurrence of the target time.
+        let now = Local::now();
+        let today = now.date_naive().and_time(target);
+        let next = if today > now.naive_local() {
+            today
+        } else {
+            today + ChronoDuration::days(1)
+        };
+
+        let wait = (next - now.naive_local()).num_seconds().max(0) as u64;
+        info(
+            &tx,
+            format!(
+                "Next run at {} (in {}h {:02}m)",
+                next.format("%Y-%m-%d %H:%M"),
+                wait / 3600,
+                (wait % 3600) / 60
+            ),
+        );
+
+        tokio::time::sleep(Duration::from_secs(wait)).await;
+
+        if let Err(e) = run_bot(cfg, &tx).await {
+            error(&tx, format!("Run failed: {e}"));
+        }
+
+        // Move past the scheduled minute so the next loop schedules tomorrow,
+        // not a second run inside the same minute.
+        tokio::time::sleep(Duration::from_secs(61)).await;
+    }
 }
