@@ -5,6 +5,8 @@ services:
     restart: unless-stopped
     # Chrome needs adequate shared memory
     shm_size: "2gb"
+    # Global --config flag comes BEFORE the subcommand (it's a parent arg)
+    command: ["tiktok-streak-saver", "--config", "/app/config.toml", "once"]
     volumes:
       # Config and cookies (read-only)
       - ./data/config.toml:/app/config.toml:ro
