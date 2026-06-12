@@ -1,6 +1,7 @@
 # ── Sensitive / credentials ──
 cookies.json
 cookies.txt
+ren_cookies.txt
 config.json
 config.toml
 
