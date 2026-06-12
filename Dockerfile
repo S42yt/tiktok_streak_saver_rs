@@ -34,4 +34,4 @@ COPY --from=builder /build/target/release/tiktok-streak-saver /usr/local/bin/
 RUN mkdir -p /app/data
 
 # Default: headless one-shot mode (schedule handled by the binary)
-CMD ["tiktok-streak-saver", "--config", "/app/config.toml", "once"]
+CMD ["tiktok-streak-saver"]
