@@ -38,7 +38,8 @@
       "Bash(reg query *)",
       "Bash(wmic datafile *)",
       "Bash(timeout 30 ./target/release/tiktok-streak-saver.exe once)",
-      "Bash(grep -r \"fn.*chrome.*option\\\\|fn.*exclude\\\\|fn.*insert.*browser\\\\|fn set_logging\\\\|fn add_setting\" target/debug/.fingerprint/../../../.cargo/registry/src/*/thirtyfour-0.35.0/src/)"
+      "Bash(grep -r \"fn.*chrome.*option\\\\|fn.*exclude\\\\|fn.*insert.*browser\\\\|fn set_logging\\\\|fn add_setting\" target/debug/.fingerprint/../../../.cargo/registry/src/*/thirtyfour-0.35.0/src/)",
+      "PowerShell($paths = @\\(\"$env:USERPROFILE\\\\.local\\\\bin\\\\chromedriver.exe\", \"C:\\\\ProgramData\\\\chocolatey\\\\bin\\\\chromedriver.exe\"\\); foreach \\($p in $paths\\) { if \\(Test-Path $p\\) { Write-Host \"FOUND: $p\"; & $p --version } }; \\(Get-Command chromedriver -ErrorAction SilentlyContinue\\).Source)"
     ]
   }
 }
